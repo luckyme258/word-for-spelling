@@ -11,6 +11,10 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayo
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QPalette, QColor
 
+if getattr(sys, 'frozen', False):
+    qt_plugins_path = os.path.join(sys._MEIPASS, "PySide6", "plugins")
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = qt_plugins_path
+
 class SpellingApp(QMainWindow):
     def __init__(self):
         super().__init__()
