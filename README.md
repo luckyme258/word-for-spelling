@@ -11,4 +11,9 @@
 - exam_dir.exe 适配win11. 直接使用
 
 ---
-由于百度翻译无法正常下载，切换成谷歌tts进行语音合成（dowload_gtts.py），获取单词发音，这个代码是美音
+- 由于百度翻译无法正常下载，切换成谷歌tts进行语音合成（dowload_gtts.py），获取单词发音，这个代码是美音
+- exam_dir_bigger.py是pyside6做的界面
+- exam_dir_small_exe.py是更简单的ui做的界面
+- 二者如果都是用python脚本，没太大区别。唯一的不同就是。pyside版本的exe很大，接近300MB，后者是30MB
+- exe暂时不会上传，超过25MB不能直接上传，使用pyexe.py自己转换一下吧
+
