@@ -1,77 +1,108 @@
 
 # //https://fanyi.baidu.com/gettts?lan=uk&text=singer&spd=3
-import requests
-import os
-from urllib.parse import quote  # 用于URL编码（处理空格、特殊字符）
+    import os
+    import time
+    import random
+    from gtts import gTTS
+    from gtts.tokenizer import pre_processors
+    import requests
+    from urllib3.exceptions import ReadTimeoutError
 
-def batch_download_tts(word_file_path, save_dir, lan="uk", spd=3):
-    """
-    批量下载百度翻译TTS音频
-    :param word_file_path: words.txt的路径
-    :param save_dir: MP3文件的保存目录
-    :param lan: 语言类型（uk=英语，zh=中文，更多语言可查百度TTS文档）
-    :param spd: 语速（1-9，数字越大越快，默认4）
-    """
-    # 1. 检查单词文件是否存在
-    if not os.path.exists(word_file_path):
-        print(f"错误：单词文件 {word_file_path} 不存在！")
-        return
+    def batch_download_gtts(word_file_path, save_dir, lang="en", slow=False, max_retries=3, file_min_size=100):
+        """
+        批量使用gTTS生成语音文件（增加空文件检查和自动重试）
+        :param file_min_size: 最小文件大小（字节），小于此值视为无效文件
+        """
+        if not os.path.exists(word_file_path):
+            print(f"错误：单词文件 {word_file_path} 不存在！")
+            return
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"保存目录：{os.path.abspath(save_dir)}")
 
-    # 2. 创建保存MP3的目录（不存在则自动创建）
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-        print(f"已创建保存目录：{save_dir}")
+        with open(word_file_path, "r", encoding="utf-8") as f:
+            words = [line.strip() for line in f if line.strip()]
+        if not words:
+            print("错误：未找到有效单词！")
+            return
+        print(f"共读取到 {len(words)} 个单词，开始生成语音...\n")
 
-    # 3. 读取单词列表（按行读取，去除空行和前后空格）
-    with open(word_file_path, "r", encoding="utf-8") as f:
-        words = [line.strip() for line in f if line.strip()]  # 过滤空行
-    if not words:
-        print("错误：words.txt中没有有效单词！")
-        return
-    print(f"共读取到 {len(words)} 个单词/词组，开始下载...")
+        for index, word in enumerate(words, 1):
+            safe_filename = word.replace("/", "-").replace("\\", "-").replace("?", "").replace("*", "").replace(":", "").replace("\"", "").replace("<", "").replace(">", "").replace("|", "") + ".mp3"
+            save_path = os.path.join(save_dir, safe_filename)
 
-    # 4. 循环下载每个单词的MP3
-    for index, word in enumerate(words, start=1):
-        try:
-            # 构造TTS请求URL（需对单词进行URL编码，处理空格/特殊字符）
-            encoded_word = quote(word, encoding="utf-8")  # 如 "high technology" → "high%20technology"
-            tts_url = f"https://fanyi.baidu.com/gettts?lan={lan}&text={encoded_word}&spd={spd}"
+            # 检查已有文件是否有效（即使存在，若为空也需要重新下载）
+            if os.path.exists(save_path):
+                if os.path.getsize(save_path) >= file_min_size:
+                    print(f"[{index}/{len(words)}] 已存在有效文件，跳过：{word}")
+                    continue
+                else:
+                    print(f"[{index}/{len(words)}] 发现空文件，将重新下载：{word}")
+                    os.remove(save_path)  # 删除无效文件
 
-            # 发送请求（模拟浏览器请求头，避免被接口拦截）
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
-            }
-            response = requests.get(tts_url, headers=headers, timeout=10)  # 超时10秒防止卡住
+            # 核心下载逻辑（增加空文件检查的重试）
+            success = False
+            for main_try in range(max_retries):  # 主循环：最多完整重试max_retries次
+                try:
+                    print(f"[{index}/{len(words)}] 第{main_try+1}轮尝试生成：{word}")
+                    
+                    # 生成语音
+                    processed_text = pre_processors.word_sub(word)
+                    tts = gTTS(text=processed_text, lang=lang, slow=slow, lang_check=True)
+                    tts.save(save_path)
+                    
+                    # 检查文件大小（关键：确保非空）
+                    if os.path.getsize(save_path) < file_min_size:
+                        raise Exception(f"生成的文件过小（{os.path.getsize(save_path)}字节），可能无效")
 
-            # 检查请求是否成功（百度TTS成功时返回200，且内容为MP3二进制）
-            if response.status_code == 200 and "audio/mpeg" in response.headers.get("Content-Type", ""):
-                # 生成保存文件名（用单词命名，避免特殊字符，如将"/"替换为"-"）
-                safe_filename = word.replace("/", "-").replace("\\", "-") + ".mp3"
-                save_path = os.path.join(save_dir, safe_filename)
+                    # 验证通过
+                    file_size = os.path.getsize(save_path) // 1024
+                    print(f"[{index}/{len(words)}] 成功生成：{safe_filename}（{file_size}KB）")
+                    success = True
+                    break
 
-                # 写入MP3文件（二进制模式）
-                with open(save_path, "wb") as mp3_file:
-                    mp3_file.write(response.content)
-                print(f"[{index}/{len(words)}] 成功下载：{save_path}")
-            else:
-                print(f"[{index}/{len(words)}] 失败（无效响应）：{word}")
+                except (requests.exceptions.RequestException, ReadTimeoutError, Exception) as e:
+                    error_msg = str(e).split("\n")[0]
+                    # 无论何种错误，先删除可能的无效文件
+                    if os.path.exists(save_path):
+                        os.remove(save_path)
+                    # 决定是否继续重试
+                    if main_try < max_retries - 1:
+                        wait_time = random.uniform(2, 5) * (main_try + 1)
+                        print(f"[{index}/{len(words)}] 第{main_try+1}次失败：{error_msg}，{wait_time:.1f}秒后重试...")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"[{index}/{len(words)}] 达到最大重试次数，跳过：{word}（最后错误：{error_msg}）")
 
-        except requests.exceptions.Timeout:
-            print(f"[{index}/{len(words)}] 失败（请求超时）：{word}")
-        except requests.exceptions.ConnectionError:
-            print(f"[{index}/{len(words)}] 失败（网络错误）：{word}")
-        except Exception as e:
-            print(f"[{index}/{len(words)}] 失败（未知错误）：{word}，错误信息：{str(e)}")
+            # 最终检查：如果所有尝试都失败，记录下来（方便后续手动处理）
+            if not success:
+                with open(os.path.join(save_dir, "failed_words.txt"), "a", encoding="utf-8") as f:
+                    f.write(f"{word}\n")
 
-    print(f"\n批量下载完成！MP3文件已保存至：{os.path.abspath(save_dir)}")
+            # 随机延迟
+            if index < len(words):
+                time.sleep(random.uniform(1, 3))
 
-# ------------------- 执行脚本 -------------------
-if __name__ == "__main__":
-    # 配置参数（可根据需求修改）
-    WORD_FILE = "words.txt"  # 单词文件路径（与脚本同目录）
-    SAVE_DIRECTORY = "tts_mp3"  # 保存MP3的文件夹名
-    SPEED = 3  # 语速（1-9，建议4-5）
-    LANGUAGE = "uk"  # 语言（uk=英语，zh=中文，jp=日语等）
+        # 提示失败的单词（如果有）
+        failed_file = os.path.join(save_dir, "failed_words.txt")
+        if os.path.exists(failed_file) and os.path.getsize(failed_file) > 0:
+            print(f"\n注意：部分单词下载失败，已记录至 {failed_file}")
+        else:
+            if os.path.exists(failed_file):
+                os.remove(failed_file)  # 删除空的失败记录
 
-    # 调用函数开始下载
-    batch_download_tts(WORD_FILE, SAVE_DIRECTORY, LANGUAGE, SPEED)
+        print(f"\n全部处理完成！文件保存至：{os.path.abspath(save_dir)}")
+
+    # 执行脚本
+    if __name__ == "__main__":
+        WORD_FILE = "words.txt"
+        SAVE_DIRECTORY = "gtts_mp3"
+        LANGUAGE = "en"  # 英语
+        SLOW_SPEECH = False
+        batch_download_gtts(
+            word_file_path=WORD_FILE,
+            save_dir=SAVE_DIRECTORY,
+            lang=LANGUAGE,
+            slow=SLOW_SPEECH,
+            max_retries=3,  # 最多重试3次
+            file_min_size=200  # 最小文件大小（字节），可根据实际情况调整
+        )
